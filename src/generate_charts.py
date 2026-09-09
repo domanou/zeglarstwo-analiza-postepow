@@ -14,24 +14,82 @@ os.makedirs(ASSETS_DIR, exist_ok=True)
 def get_window_size():
     """Pobiera od użytkownika rozmiar okna średniej kroczącej (1-10)."""
     user_input = input(
-        "Podaj liczbę startów do średniej kroczącej (1-10) [domyślnie: 10]: "
+        "\n1. Podaj liczbę startów do średniej kroczącej (1-10) [domyślnie: 10]: "
+    ).strip()
+    if not user_input:
+        return 10
+    try:
+        val = int(user_input)
+        return val if 1 <= val <= 10 else 10
+    except ValueError:
+        return 10
+
+
+def get_participant_filter():
+    """Pobiera filtr dotyczący liczby uczestników regat."""
+    print("\n2. Wybór filtru liczby uczestników regat:")
+    print("   [1] Wszystkie regaty (brak filtru)")
+    print("   [2] Tylko ogólnopolskie regaty (powyżej 50 zawodników)")
+    print("   [3] Tylko kregionalne regaty (50 i mniej zawodników)")
+    choice = input("   Wybierz opcję (1-3) [domyślnie: 1]: ").strip()
+
+    if choice == "2":
+        return "above_50"
+    elif choice == "3":
+        return "below_equal_50"
+    return "all"
+
+
+def get_excluded_regattas(filtered_df, regatta_col):
+    """Wyświetla listę regat (przefiltrowaną wstępnie wg liczby uczestników) i umożliwia wykluczenie pozycjonalne."""
+    print("\n3. Czy chcesz wykluczyć konkretne regaty z obecnej listy?")
+    choice = input("   [t/N]: ").strip().lower()
+
+    if choice != "t":
+        return []
+
+    # Pobranie unikalnych regat z przefiltrowanego już DataFrame
+    regatta_info = (
+        filtered_df[[regatta_col, "Liczba_uczestnikow"]]
+        .drop_duplicates()
+        .dropna(subset=[regatta_col])
+    )
+    regatta_info = regatta_info.sort_values(by=regatta_col)
+
+    if regatta_info.empty:
+        print("  Brak regat spełniających kryteria w bazie.")
+        return []
+
+    print("\n   Dostępne regaty (po uwzględnieniu filtru liczby uczestników):")
+    regattas_list = []
+    for idx, (_, row) in enumerate(regatta_info.iterrows(), 1):
+        name = row[regatta_col]
+        participants = int(row["Liczba_uczestnikow"])
+        regattas_list.append(name)
+        print(f"   [{idx}] {name} ({participants} zawodników)")
+
+    user_input = input(
+        "\nPodaj numery regat do wykluczenia rozdzielone przecinkami (np. 1, 4): "
     ).strip()
 
     if not user_input:
-        return 10
+        return []
 
-    try:
-        val = int(user_input)
-        if 1 <= val <= 10:
-            return val
-        print("⚠️ Liczba spoza zakresu 1-10. Ustawiam domyślnie 10.")
-        return 10
-    except ValueError:
-        print("⚠️ Nieprawidłowy format. Ustawiam domyślnie 10.")
-        return 10
+    excluded = []
+    for part in user_input.split(","):
+        try:
+            num = int(part.strip())
+            if 1 <= num <= len(regattas_list):
+                excluded.append(regattas_list[num - 1])
+        except ValueError:
+            continue
+
+    if excluded:
+        print(f"   Wykluczono: {', '.join(excluded)}")
+    return excluded
 
 
-def generate_chart(window_size):
+def generate_chart():
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(
             f"Brak bazy danych w {DB_PATH}. Uruchom wpierw src/etl.py!"
@@ -43,15 +101,51 @@ def generate_chart(window_size):
     conn.close()
 
     df["Data_rozpoczecia"] = pd.to_datetime(df["Data_rozpoczecia"])
+
+    # Określenie kolumny z nazwą regat
+    regatta_col = (
+        "Nazwa_regat_clean"
+        if "Nazwa_regat_clean" in df.columns
+        and df["Nazwa_regat_clean"].notna().any()
+        else "Nazwa_regat_raw"
+    )
+
+    # --- KONFIGURACJA FILTRÓW PRZEZ UŻYTKOWNIKA ---
+    window_size = get_window_size()
+    participant_filter = get_participant_filter()
+
+    # --- FILTR 1: LICZBA UCZESTNIKÓW (nakładany przed stworzeniem listy) ---
+    filter_label = ""
+    if participant_filter == "above_50":
+        df = df[df["Liczba_uczestnikow"] > 50]
+        filter_label = " (Uczestnicy > 50)"
+    elif participant_filter == "below_equal_50":
+        df = df[df["Liczba_uczestnikow"] <= 50]
+        filter_label = " (Uczestnicy ≤ 50)"
+
+    if df.empty:
+        print("Brak danych spełniających wybrany filtr liczby uczestników!")
+        return
+
+    # --- FILTR 2: WYKLUCZANIE KONKRETNYCH REGAT (z przefiltrowanej listy) ---
+    excluded_regattas = get_excluded_regattas(df, regatta_col)
+    if excluded_regattas:
+        df = df[~df[regatta_col].isin(excluded_regattas)]
+
+    if df.empty:
+        print("Wykluczono wszystkie dostępne regaty! Brak danych do wykresu.")
+        return
+
+    # Sortowanie pod średnią kroczącą
     df = df.sort_values(["Zawodnik", "Data_rozpoczecia"])
 
-    # Wyliczenie średniej kroczącej
+    # Obliczenie średniej kroczącej
     col_name = f"Srednia_kroczaca_{window_size}"
     df[col_name] = df.groupby("Zawodnik")["Normalizacja"].transform(
         lambda x: x.rolling(window=window_size, min_periods=1).mean()
     )
 
-    # Rysowanie wykresu
+    # --- RYSOWANIE WYKRESU ---
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(12, 6))
 
@@ -65,7 +159,7 @@ def generate_chart(window_size):
     )
 
     plt.title(
-        f"Porównanie postępów zawodników (Średnia krocząca z {window_size} startów)",
+        f"Porównanie postępów zawodników (Średnia z {window_size} startów){filter_label}",
         fontsize=14,
         fontweight="bold",
     )
@@ -82,16 +176,14 @@ def generate_chart(window_size):
     plt.legend(title="Zawodnik")
     plt.tight_layout()
 
-    # Zapis wykresu
+    # Zapis
     chart_path = os.path.join(ASSETS_DIR, "porownanie_zawodnikow.png")
     plt.savefig(chart_path, dpi=300)
-    print(
-        f"Wygenerowano wykres dla średniej z {window_size} startów -> {chart_path}"
-    )
+    print(f"\n Wykres zapisano w: {chart_path}")
     plt.show()
 
 
 if __name__ == "__main__":
-    selected_window = get_window_size()
-    generate_chart(selected_window)
+    generate_chart()
+
 
