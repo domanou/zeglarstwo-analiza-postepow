@@ -68,7 +68,7 @@ def run_etl():
     df = df.sort_values(["Zawodnik", "Data_rozpoczecia"])
 
     # Średnia krocząca z 3 ostatnich startów dla każdego zawodnika
-    df["Srednia_kroczaca_3"] = df.groupby("Zawodnik")[
+    df["Srednia_kroczaca_6"] = df.groupby("Zawodnik")[
         "Normalizacja"
     ].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
 
