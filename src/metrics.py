@@ -24,6 +24,22 @@ def get_season_range(available_years):
     end_year = int(end_year_input) if end_year_input else max_year
     return start_year, end_year
 
+def apply_drops(df, drops_count):
+    """Usuwa N najgorszych wyników (najniższy wskaźnik Normalizacji) dla każdego zawodnika."""
+    if drops_count <= 0:
+        return df
+
+        # Wyszukujemy indeksy N najgorszych wyników dla każdego zawodnika
+    worst_indices = (
+        df.sort_values("Normalizacja", ascending=True)
+        .groupby("Zawodnik")
+        .head(drops_count)
+        .index
+    )
+
+    # Odrzucamy te indeksy z oryginalnej ramki danych
+    return df.drop(index=worst_indices)
+
 def calculate_metrics():
     "Oblicza odchylenie standardowe, wskazuje najgorszy i najlepszy wynik, dodaje możliwość podziału wyników na sezony"
     if not os.path.exists(DB_PATH):
@@ -44,6 +60,12 @@ def calculate_metrics():
     if df.empty:
         print(f"Brak startów w latach {start_year}-{end_year}")
         return
+
+    drops_input = input("\n Ile najgorszych wyników odrzucić? [0]: ").strip()
+    drops_count = int(drops_input) if drops_input.isdigit() else 0
+
+    if drops_count > 0:
+        df = apply_drops(df, drops_count)
 
     stats_df = df.groupby("Zawodnik")["Normalizacja"].agg(
         Liczba_startow = "count",

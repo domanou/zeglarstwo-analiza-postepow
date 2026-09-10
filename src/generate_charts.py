@@ -3,6 +3,8 @@ import sqlite3
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from metrics import apply_drops
+from metrics import get_season_range
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "zeglarstwo.db")
@@ -43,7 +45,7 @@ def get_participant_filter():
 def get_excluded_regattas(filtered_df, regatta_col):
     """Wyświetla listę regat (przefiltrowaną wstępnie wg liczby uczestników) i umożliwia wykluczenie pozycjonalne."""
     print("\n3. Czy chcesz wykluczyć konkretne regaty z obecnej listy?")
-    choice = input("   [t/N]: ").strip().lower()
+    choice = input("   [T/N]: ").strip().lower()
 
     if choice != "t":
         return []
@@ -101,6 +103,16 @@ def generate_chart():
     conn.close()
 
     df["Data_rozpoczecia"] = pd.to_datetime(df["Data_rozpoczecia"])
+    df["Rok"] = df["Data_rozpoczecia"].dt.year
+
+    available_years = df["Rok"].dropna().unique()
+    if len(available_years) > 0:
+        start_year, end_year = get_season_range(available_years)
+        df = df[(df["Rok"] >= start_year) & (df["Rok"] <= end_year)]
+
+    if df.empty:
+        print(f" Brak startów w wybranym zakresie lat!")
+        return
 
     # Określenie kolumny z nazwą regat
     regatta_col = (
@@ -135,6 +147,13 @@ def generate_chart():
     if df.empty:
         print("Wykluczono wszystkie dostępne regaty! Brak danych do wykresu.")
         return
+
+    # --- FILTR 3: WYKLUCZANIE NAJGORSZYCH WYNIKÓW ---
+    drops_input = input("\n Ile najgorszych wyników odrzucić? [0]: ").strip()
+    drops_count = int(drops_input) if drops_input.isdigit() else 0
+
+    if drops_count > 0:
+        df = apply_drops(df, drops_count)
 
     # Sortowanie pod średnią kroczącą
     df = df.sort_values(["Zawodnik", "Data_rozpoczecia"])
