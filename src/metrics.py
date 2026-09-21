@@ -73,8 +73,10 @@ def calculate_metrics():
         Mediana = "median",
         Odchylenie_standardowe = "std",
         Najlepszy_wynik = "max",
-        Najgorszy_wynik = "min",
+        Najgorszy_wynik = "min"
     ).reset_index()
+
+    stats_df["CV"] = stats_df["Odchylenie_standardowe"]/stats_df["Srednia"]
 
     stats_df = stats_df.round(3)
 
